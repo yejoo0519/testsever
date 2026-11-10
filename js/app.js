@@ -8,6 +8,8 @@
   const bvOf = s => (s && s.hp && s.atk && s.def) ? s.hp * s.atk * s.def : 0;
   const M = v => v ? (v / 1e6).toFixed(1) : '—';
   const SLOT = ['1번용', '2번용', '3번용'];
+  const EOK = v => v ? Math.round(v / 1e8) + '억' : '—';   // 총 비밸은 억 단위 정수로
+  const avgOf = bvs => { const f = bvs.filter(v => v > 0); return f.length ? f.reduce((a, b) => a + b, 0) / f.length : 0; };
 
   let me = { session: null, role: null };
 
@@ -102,27 +104,26 @@
     const rows = specs.map(s => {
       const sl = (s.slots || []).slice(0, 3);
       const own = ownerName(s), nm = acctName(s);
-      return { nick: nm, owner: own && own !== nm ? own : '', sl, bvs: [0, 1, 2].map(i => bvOf(sl[i])), total: s.total || sl.reduce((a, x) => a + bvOf(x), 0) };
+      const bvs = [0, 1, 2].map(i => bvOf(sl[i]));
+      return { nick: nm, owner: own && own !== nm ? own : '', sl, bvs, total: bvs.reduce((a, b) => a + b, 0), avg: avgOf(bvs) };
     });
-    const key = mode === 'total' ? r => r.total : r => r.bvs[mode];
+    const key = mode === 'total' ? r => r.avg : r => r.bvs[mode];
     return rows.filter(r => key(r) > 0).sort((a, b) => key(b) - key(a));
   }
-  function rankTable(specs, mode) {
-    const rows = rankRows(specs, mode);
+  // 합산 비밸 순위 하나만. 줄을 누르면 1·2·3번용 세부가 펼쳐진다
+  function rankTable(specs) {
+    const rows = rankRows(specs, 'total');
     if (!rows.length) return '<div class="empty">아직 등록된 스펙이 없어요.</div>';
-    const cls = i => i < 3 ? ' class="r' + (i + 1) + '"' : '';
-    if (mode === 'total') {
-      return `<table class="rk"><thead><tr><th></th><th>닉네임</th>${SLOT.map(s => `<th class="hide-m">${s}</th>`).join('')}<th>합산 비밸</th></tr></thead><tbody>` +
-        rows.map((r, i) => `<tr${cls(i)}><td><span class="rank">${i + 1}</span></td><td class="nm">${esc(r.nick)}${r.owner ? `<div class="own">${esc(r.owner)}</div>` : ''}</td>` +
-          r.bvs.map((v, k) => `<td class="hide-m"><span class="slotcell">${r.sl[k] && r.sl[k].img ? `<img class="th" src="${r.sl[k].img}" alt="">` : ''}<span class="bv">${M(v)}</span></span></td>`).join('') +
-          `<td><span class="bv main">${M(r.total)}</span></td></tr>`).join('') + '</tbody></table>';
-    }
-    return `<table class="rk"><thead><tr><th></th><th>닉네임</th><th>드래곤</th><th class="hide-m">체 / 공 / 방</th><th>${SLOT[mode]} 비밸</th></tr></thead><tbody>` +
-      rows.map((r, i) => {
-        const s = r.sl[mode] || {};
-        return `<tr${cls(i)}><td><span class="rank">${i + 1}</span></td><td class="nm">${esc(r.nick)}${r.owner ? `<div class="own">${esc(r.owner)}</div>` : ''}</td><td>${s.img ? `<img class="th" src="${s.img}" alt="">` : ''}</td>` +
-          `<td class="hide-m st"><span class="h">${s.hp || 0}</span> / <span class="a">${s.atk || 0}</span> / <span class="d">${s.def || 0}</span></td><td><span class="bv main">${M(r.bvs[mode])}</span></td></tr>`;
-      }).join('') + '</tbody></table>';
+    const rc = i => i < 3 ? ' r' + (i + 1) : '';
+    return `<table class="rk"><thead><tr><th></th><th>닉네임</th><th>평균 비밸</th><th class="cv"></th></tr></thead><tbody>` +
+      rows.map((r, i) => `<tr class="rrow${rc(i)}" data-i="${i}"><td><span class="rank">${i + 1}</span></td><td class="nm">${esc(r.nick)}${r.owner ? `<div class="own">${esc(r.owner)}</div>` : ''}</td>` +
+        `<td><span class="bv main">${M(r.avg)}</span><div class="own">총 ${EOK(r.total)}</div></td><td class="cv">▸</td></tr>` +
+        `<tr class="det" hidden><td colspan="4"><div class="dslots">${[0, 1, 2].map(k => {
+          const sl = r.sl[k] || {};
+          return `<div class="dslot"><div class="dno">${SLOT[k]}</div>${sl.img ? `<img src="${sl.img}" alt="">` : '<div class="noimg"></div>'}
+            <div class="st"><span class="h">${sl.hp || 0}</span> / <span class="a">${sl.atk || 0}</span> / <span class="d">${sl.def || 0}</span></div>
+            <div class="bv">${M(r.bvs[k])}</div></div>`;
+        }).join('')}</div></td></tr>`).join('') + '</tbody></table>';
   }
   async function rankingView(adminView) {
     const weeks = await getWeeks();
@@ -133,18 +134,15 @@
     }
     let wid = +(sessionStorage.getItem('go_week') || 0);
     if (!weeks.some(w => w.id === wid)) wid = weeks[0].id;
-    let mode = sessionStorage.getItem('go_mode') || 'total';
-    mode = mode === 'total' ? 'total' : +mode;
-    view.innerHTML = `<h1>${esc(title)}</h1><div class="sub">길드전 배치 화면 기준 · 비밸 = 체력 × 공격 × 방어 (백만)</div>
+    view.innerHTML = `<h1>${esc(title)}</h1><div class="sub">길드전 배치 화면 기준 · 비밸 = 체력 × 공격 × 방어 · 평균은 백만 단위, 총합은 억 단위</div>
       <div class="row"><select class="in" id="wk">${weeks.map(w => `<option value="${w.id}"${w.id === wid ? ' selected' : ''}>${esc(weekLabel(w))}</option>`).join('')}</select><span class="grow"></span></div>
       <div class="buffs" id="buffs"></div>
       ${adminView ? '<div class="chips" id="chips"></div>' : ''}
-      <div class="tabs" id="tabs">${['total', 0, 1, 2].map(m => `<button data-m="${m}" class="${m === mode ? 'on' : ''}">${m === 'total' ? '합산' : SLOT[m]}</button>`).join('')}</div>
+      <div class="sub" style="margin:14px 0 4px">줄을 누르면 1·2·3번용 세부가 보여요.</div>
       <div id="tbl"></div>${adminView ? '<div id="missing"></div>' : ''}`;
     let specs = [];
     const draw = () => {
-      $('#tbl').innerHTML = rankTable(specs, mode);
-      $('#tabs').querySelectorAll('button').forEach(b => b.classList.toggle('on', String(mode) === b.dataset.m));
+      $('#tbl').innerHTML = rankTable(specs);
     };
     const load = async () => {
       const w = weeks.find(x => x.id === wid);
@@ -157,17 +155,18 @@
         const mem = (await getAccounts()).filter(a => act.has(a.member_id));
         const done = new Set(specs.map(s => s.account_id));
         const miss = mem.filter(m => !done.has(m.id)).map(a => ({ nickname: a.name }));
-        const tot = specs.map(s => s.total).filter(Boolean);
+        const tot = rankRows(specs, 'total').map(r => r.avg);
         $('#chips').innerHTML = `<div class="chip"><small>제출 (계정)</small><b>${specs.length}</b> / ${mem.length}</div>
-          <div class="chip"><small>합산 평균</small><b>${M(tot.length ? tot.reduce((a, b) => a + b, 0) / tot.length : 0)}</b></div>
-          <div class="chip"><small>합산 1위</small><b>${M(tot.length ? Math.max(...tot) : 0)}</b></div>`;
+          <div class="chip"><small>길드 평균 비밸</small><b>${M(tot.length ? tot.reduce((a, b) => a + b, 0) / tot.length : 0)}</b></div>
+          <div class="chip"><small>평균 비밸 1위</small><b>${M(tot.length ? Math.max(...tot) : 0)}</b></div>`;
         $('#missing').innerHTML = miss.length ? `<div class="card" style="margin-top:16px"><b>미제출 계정 ${miss.length}개</b><div class="sub" style="margin:6px 0 0">${miss.map(m => esc(m.nickname)).join(' · ')}</div></div>` : '';
       }
     };
     $('#wk').onchange = e => { wid = +e.target.value; sessionStorage.setItem('go_week', wid); load(); };
-    $('#tabs').onclick = e => {
-      const b = e.target.closest('button'); if (!b) return;
-      mode = b.dataset.m === 'total' ? 'total' : +b.dataset.m; sessionStorage.setItem('go_mode', mode); draw();
+    $('#tbl').onclick = e => {
+      const tr = e.target.closest('tr.rrow'); if (!tr) return;
+      const det = tr.nextElementSibling, open = det.hidden;
+      det.hidden = !open; tr.classList.toggle('open', open); tr.querySelector('.cv').textContent = open ? '▾' : '▸';
     };
     await load();
   }
@@ -309,7 +308,7 @@
             <div><label style="color:var(--atk)">공격</label><input class="in" inputmode="numeric" data-s="${i}" data-f="atk" value="${s.atk || ''}"></div>
             <div><label style="color:var(--def)">방어</label><input class="in" inputmode="numeric" data-s="${i}" data-f="def" value="${s.def || ''}"></div></div>
             <div class="bvl">비밸 <b data-bv="${i}">${M(bvOf(s))}</b></div></div>`).join('')}</div>
-          <div class="item-ft"><span class="total">합산 <b data-total>${M(total)}</b></span><span class="status ${it.saved ? 'ok' : ''}">${it.saved ? '저장됨' : esc(it.msg || '')}</span>
+          <div class="item-ft"><span class="total">평균 <b data-total>${M(avgOf(it.slots.map(bvOf)))}</b> · 총 <span data-eok>${EOK(total)}</span></span><span class="status ${it.saved ? 'ok' : ''}">${it.saved ? '저장됨' : esc(it.msg || '')}</span>
           <span class="row"><button class="btn sm" data-act="del">빼기</button><button class="btn gold sm" data-act="save">${it.saved ? '다시 저장' : '저장'}</button></span></div>`;
       }
       const findIt = el => items.find(x => 'it-' + x.id === el.closest('.item').id);
@@ -320,7 +319,8 @@
           s[e.target.dataset.f] = parseInt(e.target.value.replace(/\D/g, ''), 10) || 0;
           it.saved = false;
           e.target.closest('.item').querySelector(`[data-bv="${e.target.dataset.s}"]`).textContent = M(bvOf(s));
-          e.target.closest('.item').querySelector('[data-total]').textContent = M(it.slots.reduce((a, x) => a + bvOf(x), 0));
+          e.target.closest('.item').querySelector('[data-total]').textContent = M(avgOf(it.slots.map(bvOf)));
+          e.target.closest('.item').querySelector('[data-eok]').textContent = EOK(it.slots.reduce((a, x) => a + bvOf(x), 0));
         } else if (e.target.dataset.k === 'newnick') { it.newNick = e.target.value; }
       });
       $('#items').addEventListener('change', e => {
@@ -362,7 +362,7 @@
           const slots = it.slots.map(s => ({ hp: s.hp || 0, atk: s.atk || 0, def: s.def || 0, img: s.img || '' }));
           const total = slots.reduce((a, s) => a + bvOf(s), 0);
           await q(sb.from('go_specs').upsert({ week_id: wid, account_id: it.memberId, member_id: acc ? acc.member_id : null, slots, total, updated_by: toId(me.session.user.email), updated_at: new Date().toISOString() }, { onConflict: 'week_id,account_id' }));
-          log('spec.save', `${weeks.find(w => w.id === wid).start_date} ${acc ? acc.name : it.memberId} ${M(total)}`);
+          log('spec.save', `${weeks.find(w => w.id === wid).start_date} ${acc ? acc.name : it.memberId} 평균 ${M(avgOf(slots.map(bvOf)))}`);
           existing.add(it.memberId);
           it.saved = true; it.msg = '';
         } catch (err) { it.msg = err.message; it.saved = false; }

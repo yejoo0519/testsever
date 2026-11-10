@@ -112,3 +112,19 @@ table.rk{width:100%;border-collapse:separate;border-spacing:0 6px}
   .rk td{padding:9px 8px}
   .th{width:44px;height:32px}
 }
+
+.rk tr.rrow{cursor:pointer}
+.rk tr.rrow:hover td{background:var(--sf2)}
+.rk th.cv,.rk td.cv{width:34px;color:var(--dim);text-align:center}
+.rk tr.rrow.open td{border-bottom-color:transparent}
+.rk tr.det td{background:var(--sf);border:1px solid var(--bd);border-top:none;border-radius:0 0 10px 10px;padding:4px 12px 12px;text-align:left}
+.rk tr.rrow.open td:first-child{border-bottom-left-radius:0}
+.rk tr.rrow.open td:last-child{border-bottom-right-radius:0}
+.rk tr.det{transform:translateY(-6px)}
+.dslots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.dslot{background:var(--sf2);border:1px solid var(--bd);border-radius:9px;padding:8px;text-align:center;white-space:normal}
+.dslot .dno{font-size:12px;font-weight:900;color:var(--gold);margin-bottom:6px}
+.dslot img,.dslot .noimg{width:100%;height:64px;object-fit:contain;background:#000;border-radius:6px;display:block}
+.dslot .st{margin-top:6px}
+.dslot .bv{margin-top:2px}
+@media(max-width:760px){.dslots{gap:6px}.dslot{padding:6px}.dslot img,.dslot .noimg{height:48px}.dslot .st{font-size:10.5px}}
