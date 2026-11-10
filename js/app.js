@@ -238,7 +238,7 @@
     const H = (String(reads.kor || '').match(/[가-힣]/g) || []).join('');
     const cl = t => String(t || '').toLowerCase().replace(/[^0-9a-z]/g, '');
     const toks = String(reads.eng || '').split(/[.\s]+/).filter(Boolean);
-    const Lts = [cl(reads.eng), cl(toks[0]), cl(toks[toks.length - 1])];   // 한글 자리는 영문 판독이 깨지므로 앞·뒤 토막도 본다
+    const Lts = H ? [cl(reads.eng), cl(toks[0]), cl(toks[toks.length - 1])] : [cl(reads.eng)];   // 한글 자리는 영문 판독이 깨지므로 앞·뒤 토막도 본다
     const Lt = Lts[0];
     const simL = lk => Math.max(...Lts.map(t => sim(lk, t)));
     if (!H && !Lt) return null;
