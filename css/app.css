@@ -84,6 +84,16 @@ table.rk{width:100%;border-collapse:separate;border-spacing:0 6px}
 .list{display:flex;flex-direction:column;gap:6px}
 .li{display:flex;align-items:center;gap:10px;background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:10px 14px;flex-wrap:wrap}
 .li.off{opacity:.55}
+.mem .li{border-radius:10px}
+.mem.off>.li{opacity:.55}
+.mem .caret{background:none;border:none;color:var(--dim);cursor:pointer;width:18px;padding:0;font-size:13px}
+.mem b[data-act]{cursor:pointer}
+.mem .accs{display:none;margin:4px 0 4px 26px;flex-direction:column;gap:4px}
+.mem.open .accs{display:flex}
+.acc{display:flex;align-items:center;gap:8px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;font-size:13px;flex-wrap:wrap}
+.acc.add{background:transparent;border-style:dashed}
+.acc.add .in{padding:5px 8px;font-size:12px}
+.rk .own{font-size:11px;color:var(--dimmer);font-weight:600;margin-top:2px}
 .badge{font-size:10px;font-weight:900;padding:2px 7px;border-radius:999px;border:1px solid var(--bd);color:var(--dim)}
 .badge.gold{color:var(--gold);border-color:var(--gold-bd)}
 .badge.red{color:var(--red);border-color:rgba(248,113,113,.4)}

@@ -43,7 +43,11 @@
   const weekLabel = w => (w.title ? w.title + ' · ' : '') + w.start_date.slice(5).replace('-', '/') + ' 주';
   const getWeeks = () => q(sb.from('go_weeks').select('*').order('start_date', { ascending: false }));
   const getMembers = () => q(sb.from('go_members').select('*').order('nickname'));
-  const getSpecs = wid => q(sb.from('go_specs').select('*, go_members(nickname, active)').eq('week_id', wid));
+  const getAccounts = () => q(sb.from('go_accounts').select('*').order('name'));
+  const getSpecs = wid => q(sb.from('go_specs').select('*, go_accounts(name, member_id, go_members(nickname, active))').eq('week_id', wid));
+  // 길드원(사람) 아래에 게임 계정이 여러 개 있을 수 있음. 랭킹·스펙은 계정 단위
+  const acctName = s => s.go_accounts ? s.go_accounts.name : '?';
+  const ownerName = s => s.go_accounts && s.go_accounts.go_members ? s.go_accounts.go_members.nickname : '';
 
   /* ── 로그인 상태 / 메뉴 ─────────────────────────── */
   async function refreshMe() {
@@ -97,7 +101,8 @@
   function rankRows(specs, mode) {
     const rows = specs.map(s => {
       const sl = (s.slots || []).slice(0, 3);
-      return { nick: s.go_members ? s.go_members.nickname : '?', sl, bvs: [0, 1, 2].map(i => bvOf(sl[i])), total: s.total || sl.reduce((a, x) => a + bvOf(x), 0) };
+      const own = ownerName(s), nm = acctName(s);
+      return { nick: nm, owner: own && own !== nm ? own : '', sl, bvs: [0, 1, 2].map(i => bvOf(sl[i])), total: s.total || sl.reduce((a, x) => a + bvOf(x), 0) };
     });
     const key = mode === 'total' ? r => r.total : r => r.bvs[mode];
     return rows.filter(r => key(r) > 0).sort((a, b) => key(b) - key(a));
@@ -108,14 +113,14 @@
     const cls = i => i < 3 ? ' class="r' + (i + 1) + '"' : '';
     if (mode === 'total') {
       return `<table class="rk"><thead><tr><th></th><th>닉네임</th>${SLOT.map(s => `<th class="hide-m">${s}</th>`).join('')}<th>합산 비밸</th></tr></thead><tbody>` +
-        rows.map((r, i) => `<tr${cls(i)}><td><span class="rank">${i + 1}</span></td><td class="nm">${esc(r.nick)}</td>` +
+        rows.map((r, i) => `<tr${cls(i)}><td><span class="rank">${i + 1}</span></td><td class="nm">${esc(r.nick)}${r.owner ? `<div class="own">${esc(r.owner)}</div>` : ''}</td>` +
           r.bvs.map((v, k) => `<td class="hide-m"><span class="slotcell">${r.sl[k] && r.sl[k].img ? `<img class="th" src="${r.sl[k].img}" alt="">` : ''}<span class="bv">${M(v)}</span></span></td>`).join('') +
           `<td><span class="bv main">${M(r.total)}</span></td></tr>`).join('') + '</tbody></table>';
     }
     return `<table class="rk"><thead><tr><th></th><th>닉네임</th><th>드래곤</th><th class="hide-m">체 / 공 / 방</th><th>${SLOT[mode]} 비밸</th></tr></thead><tbody>` +
       rows.map((r, i) => {
         const s = r.sl[mode] || {};
-        return `<tr${cls(i)}><td><span class="rank">${i + 1}</span></td><td class="nm">${esc(r.nick)}</td><td>${s.img ? `<img class="th" src="${s.img}" alt="">` : ''}</td>` +
+        return `<tr${cls(i)}><td><span class="rank">${i + 1}</span></td><td class="nm">${esc(r.nick)}${r.owner ? `<div class="own">${esc(r.owner)}</div>` : ''}</td><td>${s.img ? `<img class="th" src="${s.img}" alt="">` : ''}</td>` +
           `<td class="hide-m st"><span class="h">${s.hp || 0}</span> / <span class="a">${s.atk || 0}</span> / <span class="d">${s.def || 0}</span></td><td><span class="bv main">${M(r.bvs[mode])}</span></td></tr>`;
       }).join('') + '</tbody></table>';
   }
@@ -148,14 +153,15 @@
       specs = await getSpecs(wid);
       draw();
       if (adminView) {
-        const mem = (await getMembers()).filter(m => m.active);
-        const done = new Set(specs.map(s => s.member_id));
-        const miss = mem.filter(m => !done.has(m.id));
+        const mems = await getMembers(), act = new Set(mems.filter(m => m.active).map(m => m.id));
+        const mem = (await getAccounts()).filter(a => act.has(a.member_id));
+        const done = new Set(specs.map(s => s.account_id));
+        const miss = mem.filter(m => !done.has(m.id)).map(a => ({ nickname: a.name }));
         const tot = specs.map(s => s.total).filter(Boolean);
-        $('#chips').innerHTML = `<div class="chip"><small>제출</small><b>${specs.length}</b> / ${mem.length}</div>
+        $('#chips').innerHTML = `<div class="chip"><small>제출 (계정)</small><b>${specs.length}</b> / ${mem.length}</div>
           <div class="chip"><small>합산 평균</small><b>${M(tot.length ? tot.reduce((a, b) => a + b, 0) / tot.length : 0)}</b></div>
           <div class="chip"><small>합산 1위</small><b>${M(tot.length ? Math.max(...tot) : 0)}</b></div>`;
-        $('#missing').innerHTML = miss.length ? `<div class="card" style="margin-top:16px"><b>미제출 ${miss.length}명</b><div class="sub" style="margin:6px 0 0">${miss.map(m => esc(m.nickname)).join(' · ')}</div></div>` : '';
+        $('#missing').innerHTML = miss.length ? `<div class="card" style="margin-top:16px"><b>미제출 계정 ${miss.length}개</b><div class="sub" style="margin:6px 0 0">${miss.map(m => esc(m.nickname)).join(' · ')}</div></div>` : '';
       }
     };
     $('#wk').onchange = e => { wid = +e.target.value; sessionStorage.setItem('go_week', wid); load(); };
@@ -226,16 +232,17 @@
       d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
     return d[a.length][b.length];
   }
-  function matchMember(nick, members) {
+  function matchMember(nick, members) { // members: [{id, nickname}]
     const n = norm(nick); if (!n) return null;
     const sc = members.map(m => {
       const k = norm(m.nickname); if (!k) return { m, s: 0 };
       let s = 1 - lev(n, k) / Math.max(n.length, k.length);
-      if (k.length >= 2 && (n.includes(k) || k.includes(n))) s = Math.max(s, 0.7 + 0.3 * Math.min(n.length, k.length) / Math.max(n.length, k.length));
+      if (k.length >= 2 && (n.includes(k) || k.includes(n))) s = Math.max(s, 0.9);
       return { m, s };
     }).sort((a, b) => b.s - a.s);
     // 비슷한 후보가 둘 이상이면(예: Genesis.주 / Genesis.지용) 잘못 고르지 않게 직접 고르게 둔다
-    if (!sc.length || sc[0].s < 0.5 || (sc[1] && sc[0].s - sc[1].s < 0.08)) return null;
+    if (!sc.length || sc[0].s < 0.5) return null;
+    if (sc[1] && sc[0].s < 0.95 && sc[0].s - sc[1].s < 0.2) return null; // 확실히 하나만 비슷할 때만 자동 선택
     return sc[0].m;
   }
 
@@ -245,6 +252,7 @@
       let weeks = await getWeeks();
       const thisMon = monday();
       let members = await getMembers();
+      let accounts = await getAccounts();
       let wid = +(sessionStorage.getItem('go_week') || 0);
       if (!weeks.some(w => w.id === wid)) wid = weeks.length ? weeks[0].id : 0;
       const items = []; let seq = 0;
@@ -263,7 +271,7 @@
       const fillWeeks = () => {
         $('#wk').innerHTML = weeks.length ? weeks.map(w => `<option value="${w.id}"${w.id === wid ? ' selected' : ''}>${esc(weekLabel(w))}</option>`).join('') : '<option value="">주차 없음</option>';
       };
-      const loadExisting = async () => { existing = new Set(wid ? (await getSpecs(wid)).map(s => s.member_id) : []); items.forEach(drawItem); };
+      const loadExisting = async () => { existing = new Set(wid ? (await getSpecs(wid)).map(s => s.account_id) : []); items.forEach(drawItem); };
       fillWeeks(); await loadExisting();
       $('#wk').onchange = e => { wid = +e.target.value; sessionStorage.setItem('go_week', wid); loadExisting(); };
       if ($('#mkwk')) $('#mkwk').onclick = async () => {
@@ -272,11 +280,17 @@
         weeks = await getWeeks(); wid = w.id; sessionStorage.setItem('go_week', wid); fillWeeks(); $('#mkwk').remove(); loadExisting();
       };
 
+      // it.memberId = 계정 id (또는 'new'), it.ownerId = 새 계정의 주인 길드원 id (또는 'new')
       const memberOpts = it => {
-        const act = members.filter(m => m.active || m.id === it.memberId);
-        return `<option value="">길드원 선택</option>` + act.map(m => `<option value="${m.id}"${m.id === it.memberId ? ' selected' : ''}>${esc(m.nickname)}</option>`).join('') +
-          `<option value="new"${it.memberId === 'new' ? ' selected' : ''}>＋ 새 길드원 추가…</option>`;
+        const groups = members.filter(m => m.active || accounts.some(a => a.id === it.memberId && a.member_id === m.id)).map(m => {
+          const acs = accounts.filter(a => a.member_id === m.id);
+          if (!acs.length) return '';
+          return `<optgroup label="${esc(m.nickname)}">` + acs.map(a => `<option value="${a.id}"${a.id === it.memberId ? ' selected' : ''}>${esc(a.name)}</option>`).join('') + '</optgroup>';
+        }).join('');
+        return `<option value="">계정 선택</option>` + groups + `<option value="new"${it.memberId === 'new' ? ' selected' : ''}>＋ 새 계정 추가…</option>`;
       };
+      const ownerOpts = it => `<option value="new"${it.ownerId === 'new' ? ' selected' : ''}>새 길드원 (계정 이름으로)</option>` +
+        members.filter(m => m.active).map(m => `<option value="${m.id}"${m.id === it.ownerId ? ' selected' : ''}>${esc(m.nickname)} 의 계정</option>`).join('');
       function drawItem(it) {
         let el = document.getElementById('it-' + it.id);
         if (!el) { el = document.createElement('div'); el.id = 'it-' + it.id; $('#items').prepend(el); }
@@ -286,7 +300,7 @@
         const total = it.slots.reduce((a, s) => a + bvOf(s), 0);
         const dup = typeof it.memberId === 'number' && existing.has(it.memberId);
         el.innerHTML = `<div class="item-hd"><select class="in" data-k="member">${memberOpts(it)}</select>
-          ${it.memberId === 'new' ? `<input class="in" data-k="newnick" placeholder="새 닉네임" value="${esc(it.newNick)}">` : ''}
+          ${it.memberId === 'new' ? `<input class="in" data-k="newnick" placeholder="게임 닉네임" value="${esc(it.newNick)}"><select class="in" data-k="owner">${ownerOpts(it)}</select>` : ''}
           ${it.ocrNick ? `<span class="ocr">읽은 닉네임: ${esc(it.ocrNick)}</span>` : ''}
           ${dup ? '<span class="badge gold">이번 주 이미 제출 · 저장하면 덮어써요</span>' : ''}<span class="grow"></span></div>
           <div class="slots">${it.slots.map((s, i) => `<div class="slot"><div class="slot-hd"><span class="no">${SLOT[i]}</span></div>
@@ -310,10 +324,12 @@
         } else if (e.target.dataset.k === 'newnick') { it.newNick = e.target.value; }
       });
       $('#items').addEventListener('change', e => {
+        if (e.target.dataset.k === 'owner') { const it = findIt(e.target); it.ownerId = e.target.value === 'new' ? 'new' : +e.target.value; it.saved = false; return; }
         if (e.target.dataset.k !== 'member') return;
         const it = findIt(e.target); const v = e.target.value;
         it.memberId = v === 'new' ? 'new' : v ? +v : null;
         if (v === 'new' && !it.newNick) it.newNick = it.ocrNick || '';
+        if (v === 'new' && !it.ownerId) it.ownerId = 'new';
         it.saved = false; drawItem(it);
       });
       $('#items').addEventListener('click', async e => {
@@ -326,18 +342,27 @@
         try {
           if (!wid) throw new Error('주차를 먼저 만들어 주세요');
           if (it.memberId === 'new') {
-            const nn = (it.newNick || '').trim(); if (!nn) throw new Error('새 닉네임을 적어 주세요');
-            let m = members.find(x => x.nickname === nn);
-            if (!m) { m = await q(sb.from('go_members').insert({ nickname: nn }).select().single()); log('member.add', nn); members = await getMembers(); }
-            it.memberId = m.id;
+            const nn = (it.newNick || '').trim(); if (!nn) throw new Error('게임 닉네임을 적어 주세요');
+            let a = accounts.find(x => x.name === nn);
+            if (!a) {
+              let owner = it.ownerId;
+              if (owner === 'new' || !owner) {
+                let m = members.find(x => x.nickname === nn);
+                if (!m) { m = await q(sb.from('go_members').insert({ nickname: nn }).select().single()); log('member.add', nn); members = await getMembers(); }
+                owner = m.id;
+              }
+              a = await q(sb.from('go_accounts').insert({ member_id: owner, name: nn }).select().single());
+              log('account.add', nn); accounts = await getAccounts();
+            }
+            it.memberId = a.id;
           }
-          if (typeof it.memberId !== 'number') throw new Error('길드원을 골라 주세요');
+          if (typeof it.memberId !== 'number') throw new Error('계정을 골라 주세요');
+          const acc = accounts.find(x => x.id === it.memberId);
           if (!it.slots.some(s => bvOf(s) > 0)) throw new Error('체/공/방을 넣어 주세요');
           const slots = it.slots.map(s => ({ hp: s.hp || 0, atk: s.atk || 0, def: s.def || 0, img: s.img || '' }));
           const total = slots.reduce((a, s) => a + bvOf(s), 0);
-          await q(sb.from('go_specs').upsert({ week_id: wid, member_id: it.memberId, slots, total, updated_by: toId(me.session.user.email), updated_at: new Date().toISOString() }, { onConflict: 'week_id,member_id' }));
-          const m = members.find(x => x.id === it.memberId);
-          log('spec.save', `${weeks.find(w => w.id === wid).start_date} ${m ? m.nickname : it.memberId} ${M(total)}`);
+          await q(sb.from('go_specs').upsert({ week_id: wid, account_id: it.memberId, member_id: acc ? acc.member_id : null, slots, total, updated_by: toId(me.session.user.email), updated_at: new Date().toISOString() }, { onConflict: 'week_id,account_id' }));
+          log('spec.save', `${weeks.find(w => w.id === wid).start_date} ${acc ? acc.name : it.memberId} ${M(total)}`);
           existing.add(it.memberId);
           it.saved = true; it.msg = '';
         } catch (err) { it.msg = err.message; it.saved = false; }
@@ -365,10 +390,13 @@
               const r = await BvOCR.read(f, m => { $('#ocrmsg').textContent = m; });
               $('#ocrmsg').textContent = '';
               Object.assign(it, { reading: false, ocrNick: r.nick, slots: r.slots, newNick: '' });
-              const m = matchMember(r.nick, members.filter(x => x.active));
-              const exact = members.filter(x => x.active).length > 0;
+              const actM = new Set(members.filter(x => x.active).map(x => x.id));
+              const pool = accounts.filter(a => actM.has(a.member_id)).map(a => ({ id: a.id, nickname: a.name }));
+              const m = matchMember(r.nick, pool);
+              const exact = pool.length > 0;
               it.memberId = m ? m.id : (r.nick && !exact ? 'new' : null);
-              if (!m) { it.newNick = r.nick; if (exact) it.msg = '길드원을 골라 주세요 (목록에 없으면 ＋ 새 길드원)'; }
+              if (!m) { it.newNick = r.nick; if (exact) it.msg = '계정을 골라 주세요 (목록에 없으면 ＋ 새 계정)'; }
+              if (it.memberId === 'new') it.ownerId = 'new';
               if (!r.slots.some(s => bvOf(s) > 0)) it.msg = '숫자를 못 읽었어요. 직접 넣어 주세요';
             } catch (err) { it.reading = false; it.error = err.message; }
             drawItem(it); updAll();
@@ -388,31 +416,63 @@
   PAGES.members = {
     admin: true,
     async render() {
-      const members = await getMembers();
-      view.innerHTML = `<h1>길드원</h1><div class="sub">랭킹에 나올 길드원 목록이에요. 탈퇴한 길드원은 '비활성'으로 두면 지난 기록은 남고 미제출 목록에서 빠져요.</div>
-        <form class="row card" id="af"><input class="in grow" id="nn" placeholder="닉네임 추가"><button class="btn gold">추가</button></form>
-        <div class="list" style="margin-top:12px">${members.length ? members.map(m => `<div class="li${m.active ? '' : ' off'}" data-id="${m.id}">
-          <b class="grow">${esc(m.nickname)}</b>${m.active ? '' : '<span class="badge">비활성</span>'}
-          <button class="btn sm" data-act="ren">이름 변경</button><button class="btn sm" data-act="act">${m.active ? '비활성' : '활성'}</button><button class="btn sm red" data-act="del">삭제</button></div>`).join('') : '<div class="empty">길드원이 없어요. 스펙 입력에서 새 닉네임으로 저장해도 자동으로 추가돼요.</div>'}</div>`;
+      const members = await getMembers(), accounts = await getAccounts();
+      const open = new Set(JSON.parse(sessionStorage.getItem('go_open') || '[]'));
+      const accOf = id => accounts.filter(a => a.member_id === id);
+      view.innerHTML = `<h1>길드원</h1><div class="sub">길드원 밑에 게임 계정(본캐·부캐)을 여러 개 둘 수 있어요. 랭킹과 스펙은 계정 단위로 저장돼요. 탈퇴한 길드원은 '비활성'으로 두면 지난 기록은 남고 미제출 목록에서 빠져요.</div>
+        <form class="row card" id="af"><input class="in grow" id="nn" placeholder="길드원 추가 (같은 이름의 계정도 같이 만들어져요)"><button class="btn gold">추가</button></form>
+        <div class="list mlist" style="margin-top:12px">${members.length ? members.map(m => {
+          const acs = accOf(m.id), on = open.has(m.id);
+          return `<div class="mem${m.active ? '' : ' off'}${on ? ' open' : ''}" data-id="${m.id}">
+            <div class="li"><button class="caret" data-act="tog" aria-label="계정 펼치기">${on ? '▾' : '▸'}</button>
+            <b class="grow" data-act="tog">${esc(m.nickname)}</b><span class="badge">계정 ${acs.length}</span>${m.active ? '' : '<span class="badge">비활성</span>'}
+            <button class="btn sm" data-act="ren">이름 변경</button><button class="btn sm" data-act="act">${m.active ? '비활성' : '활성'}</button><button class="btn sm red" data-act="del">삭제</button></div>
+            <div class="accs">${acs.map(a => `<div class="acc" data-aid="${a.id}"><span class="grow">└ ${esc(a.name)}</span><button class="btn sm" data-act="aren">이름 변경</button><button class="btn sm red" data-act="adel">삭제</button></div>`).join('')}
+              <form class="acc add" data-act="aadd"><input class="in grow" placeholder="계정 추가 (게임 닉네임)"><button class="btn sm gold">추가</button></form></div></div>`;
+        }).join('') : '<div class="empty">길드원이 없어요. 스펙 입력에서 새 계정으로 저장해도 자동으로 추가돼요.</div>'}</div>`;
       $('#af').onsubmit = async e => {
         e.preventDefault(); const nn = $('#nn').value.trim(); if (!nn) return;
-        try { await q(sb.from('go_members').insert({ nickname: nn })); log('member.add', nn); go(); } catch (err) { toast(err.message, true); }
-      };
-      view.querySelector('.list').onclick = async e => {
-        const b = e.target.closest('[data-act]'); if (!b) return;
-        const id = +b.closest('.li').dataset.id, m = members.find(x => x.id === id);
         try {
-          if (b.dataset.act === 'ren') {
-            const nn = prompt('새 닉네임', m.nickname); if (!nn || nn.trim() === m.nickname) return;
+          const m = await q(sb.from('go_members').insert({ nickname: nn }).select().single());
+          await q(sb.from('go_accounts').insert({ member_id: m.id, name: nn })).catch(() => {});
+          log('member.add', nn); go();
+        } catch (err) { toast(/duplicate|unique/i.test(err.message) ? '이미 있는 이름이에요' : err.message, true); }
+      };
+      const list = view.querySelector('.mlist');
+      list.addEventListener('submit', async e => {
+        e.preventDefault();
+        const f = e.target, mid = +f.closest('.mem').dataset.id, nn = f.querySelector('input').value.trim(); if (!nn) return;
+        try { await q(sb.from('go_accounts').insert({ member_id: mid, name: nn })); log('account.add', nn); open.add(mid); sessionStorage.setItem('go_open', JSON.stringify([...open])); go(); }
+        catch (err) { toast(/duplicate|unique/i.test(err.message) ? '이미 다른 길드원에게 있는 계정 이름이에요' : err.message, true); }
+      });
+      list.onclick = async e => {
+        const b = e.target.closest('[data-act]'); if (!b || b.tagName === 'FORM') return;
+        const box = b.closest('.mem'), id = +box.dataset.id, m = members.find(x => x.id === id);
+        try {
+          if (b.dataset.act === 'tog') {
+            open.has(id) ? open.delete(id) : open.add(id); sessionStorage.setItem('go_open', JSON.stringify([...open]));
+            box.classList.toggle('open'); box.querySelector('.caret').textContent = box.classList.contains('open') ? '▾' : '▸'; return;
+          }
+          if (b.dataset.act === 'aren' || b.dataset.act === 'adel') {
+            const aid = +b.closest('.acc').dataset.aid, a = accounts.find(x => x.id === aid);
+            if (b.dataset.act === 'aren') {
+              const nn = prompt('새 계정 이름 (게임 닉네임)', a.name); if (!nn || nn.trim() === a.name) return;
+              await q(sb.from('go_accounts').update({ name: nn.trim() }).eq('id', aid)); log('account.rename', a.name + ' → ' + nn.trim());
+            } else {
+              if (!confirm(`계정 ${a.name} 을 삭제할까요? 이 계정의 모든 주차 기록도 같이 지워져요.`)) return;
+              await q(sb.from('go_accounts').delete().eq('id', aid)); log('account.delete', a.name);
+            }
+          } else if (b.dataset.act === 'ren') {
+            const nn = prompt('새 이름', m.nickname); if (!nn || nn.trim() === m.nickname) return;
             await q(sb.from('go_members').update({ nickname: nn.trim() }).eq('id', id)); log('member.rename', m.nickname + ' → ' + nn.trim());
           } else if (b.dataset.act === 'act') {
             await q(sb.from('go_members').update({ active: !m.active }).eq('id', id)); log('member.active', m.nickname + ' ' + !m.active);
-          } else {
-            if (!confirm(`${m.nickname} 님을 삭제할까요? 이 길드원의 모든 주차 기록도 같이 지워져요.`)) return;
+          } else if (b.dataset.act === 'del') {
+            if (!confirm(`${m.nickname} 님을 삭제할까요? 밑의 계정 ${accOf(id).length}개와 모든 주차 기록도 같이 지워져요.`)) return;
             await q(sb.from('go_members').delete().eq('id', id)); log('member.delete', m.nickname);
           }
           go();
-        } catch (err) { toast(err.message, true); }
+        } catch (err) { toast(/duplicate|unique/i.test(err.message) ? '이미 있는 이름이에요' : err.message, true); }
       };
     }
   };

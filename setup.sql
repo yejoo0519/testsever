@@ -23,15 +23,23 @@ create table if not exists go_weeks (
   created_at timestamptz not null default now()
 );
 
+create table if not exists go_accounts (            -- 길드원 밑의 게임 계정 (본캐·부캐)
+  id bigint generated always as identity primary key,
+  member_id bigint not null references go_members(id) on delete cascade,
+  name text not null unique,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists go_specs (
   id bigint generated always as identity primary key,
   week_id bigint not null references go_weeks(id) on delete cascade,
-  member_id bigint not null references go_members(id) on delete cascade,
+  account_id bigint not null references go_accounts(id) on delete cascade,
+  member_id bigint references go_members(id) on delete cascade,
   slots jsonb not null,            -- [{hp,atk,def,img}] × 3  (1번용 · 2번용 · 3번용)
   total bigint not null default 0, -- 세 마리 비밸 합
   updated_by text,
   updated_at timestamptz not null default now(),
-  unique (week_id, member_id)
+  constraint go_specs_week_account_key unique (week_id, account_id)
 );
 
 create table if not exists go_logs (
@@ -55,6 +63,7 @@ $$;
 alter table go_admins  enable row level security;
 alter table go_members enable row level security;
 alter table go_weeks   enable row level security;
+alter table go_accounts enable row level security;
 alter table go_specs   enable row level security;
 alter table go_logs    enable row level security;
 
@@ -62,7 +71,7 @@ alter table go_logs    enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['go_members','go_weeks','go_specs'] loop
+  foreach t in array array['go_members','go_accounts','go_weeks','go_specs'] loop
     execute format('drop policy if exists %1$s_read on %1$s', t);
     execute format('drop policy if exists %1$s_write on %1$s', t);
     execute format('create policy %1$s_read on %1$s for select using (true)', t);
