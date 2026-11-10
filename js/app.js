@@ -6,7 +6,8 @@
   const view = $('#view');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const bvOf = s => (s && s.hp && s.atk && s.def) ? s.hp * s.atk * s.def : 0;
-  const M = v => v ? (v / 1e8).toFixed(1) + '억' : '—';   // 비밸은 억 단위 (소수 한 자리)
+  const M = v => v ? (v / 1e6).toFixed(1) : '—';             // 평균 비밸: 백만 단위 (862.3)
+  const D = v => v ? (v / 1e6).toFixed(1) : '—';             // 드래곤 한 마리 비밸: 백만 단위 (911.3)
   const SLOT = ['1번용', '2번용', '3번용'];
   const EOK = v => v ? Math.round(v / 1e8) + '억' : '—';   // 총 비밸은 억 단위 정수로
   const avgOf = bvs => { const f = bvs.filter(v => v > 0); return f.length ? f.reduce((a, b) => a + b, 0) / f.length : 0; };
@@ -122,7 +123,7 @@
           const sl = r.sl[k] || {};
           return `<div class="dslot"><div class="dno">${SLOT[k]}</div>${sl.img ? `<img src="${sl.img}" alt="">` : '<div class="noimg"></div>'}
             <div class="st"><span class="h">${sl.hp || 0}</span> / <span class="a">${sl.atk || 0}</span> / <span class="d">${sl.def || 0}</span></div>
-            <div class="bv">${M(r.bvs[k])}</div></div>`;
+            <div class="bv">${D(r.bvs[k])}</div></div>`;
         }).join('')}</div></td></tr>`).join('') + '</tbody></table>';
   }
   async function rankingView(adminView) {
@@ -134,7 +135,7 @@
     }
     let wid = +(sessionStorage.getItem('go_week') || 0);
     if (!weeks.some(w => w.id === wid)) wid = weeks[0].id;
-    view.innerHTML = `<h1>${esc(title)}</h1><div class="sub">길드전 배치 화면 기준 · 비밸 = 체력 × 공격 × 방어 · 억 단위</div>
+    view.innerHTML = `<h1>${esc(title)}</h1><div class="sub">길드전 배치 화면 기준 · 비밸 = 체력 × 공격 × 방어 · 비밸은 백만 단위, 총합은 억 단위</div>
       <div class="row"><select class="in" id="wk">${weeks.map(w => `<option value="${w.id}"${w.id === wid ? ' selected' : ''}>${esc(weekLabel(w))}</option>`).join('')}</select><span class="grow"></span></div>
       <div class="buffs" id="buffs"></div>
       ${adminView ? '<div class="chips" id="chips"></div>' : ''}
@@ -267,6 +268,8 @@
         <div class="items" id="items"></div>
         <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn gold" id="saveall" hidden>전부 저장</button></div>`;
 
+      // 들어오자마자 글자 인식 엔진을 미리 받아 둔다
+      BvOCR.warm(p => { const el = $('#ocrmsg'); if (el && route().name === 'specs') { el.textContent = p.msg || (p.done ? '글자 인식 준비 완료' : ''); el.className = 'status' + (p.err ? ' bad' : p.done ? ' ok' : ''); } }).catch(() => {});
       const fillWeeks = () => {
         $('#wk').innerHTML = weeks.length ? weeks.map(w => `<option value="${w.id}"${w.id === wid ? ' selected' : ''}>${esc(weekLabel(w))}</option>`).join('') : '<option value="">주차 없음</option>';
       };
@@ -294,7 +297,7 @@
         let el = document.getElementById('it-' + it.id);
         if (!el) { el = document.createElement('div'); el.id = 'it-' + it.id; $('#items').prepend(el); }
         el.className = 'item' + (it.saved ? ' saved' : '') + (it.error ? ' err' : '');
-        if (it.reading) { el.innerHTML = `<div class="status">${esc(it.fileName)} 읽는 중…</div>`; return; }
+        if (it.reading) { el.innerHTML = `<div class="reading">${it.preview ? `<img src="${it.preview}" alt="">` : ''}<div class="status">${esc(it.fileName)} · ${esc(it.readMsg || '읽는 중…')}</div></div>`; return; }
         if (it.error) { el.innerHTML = `<div class="item-hd"><b>${esc(it.fileName)}</b><span class="status bad">${esc(it.error)}</span><span class="grow"></span><button class="btn sm" data-act="del">빼기</button></div>`; return; }
         const total = it.slots.reduce((a, s) => a + bvOf(s), 0);
         el.dataset.bad = it.slots.some(s => s.check === 'bad') ? '1' : '';
@@ -303,12 +306,13 @@
           ${it.memberId === 'new' ? `<input class="in" data-k="newnick" placeholder="게임 닉네임" value="${esc(it.newNick)}"><select class="in" data-k="owner">${ownerOpts(it)}</select>` : ''}
           ${it.ocrNick ? `<span class="ocr">읽은 닉네임: ${esc(it.ocrNick)}</span>` : ''}
           ${dup ? '<span class="badge gold">이번 주 이미 제출 · 저장하면 덮어써요</span>' : ''}<span class="grow"></span></div>
+          ${it.shot ? `<img class="shot" src="${it.shot}" alt="">` : ''}
           <div class="slots">${it.slots.map((s, i) => `<div class="slot"><div class="slot-hd"><span class="no">${SLOT[i]}</span><span class="grow"></span><span class="chk" data-chk="${i}">${chkHtml(s)}</span></div>
             ${s.img ? `<img src="${s.img}" alt="">` : ''}
             <div class="f"><div><label style="color:var(--hp)">체력</label><input class="in" inputmode="numeric" data-s="${i}" data-f="hp" value="${s.hp || ''}"></div>
             <div><label style="color:var(--atk)">공격</label><input class="in" inputmode="numeric" data-s="${i}" data-f="atk" value="${s.atk || ''}"></div>
             <div><label style="color:var(--def)">방어</label><input class="in" inputmode="numeric" data-s="${i}" data-f="def" value="${s.def || ''}"></div></div>
-            <div class="bvl">비밸 <b data-bv="${i}">${M(bvOf(s))}</b></div></div>`).join('')}</div>
+            <div class="bvl">비밸 <b data-bv="${i}">${D(bvOf(s))}</b></div></div>`).join('')}</div>
           <div class="item-ft"><span class="total">평균 <b data-total>${M(avgOf(it.slots.map(bvOf)))}</b> · 총 <span data-eok>${EOK(total)}</span></span><span class="status ${it.saved ? 'ok' : ''}">${it.saved ? '저장됨' : esc(it.msg || '')}</span>
           <span class="row"><button class="btn sm" data-act="del">빼기</button><button class="btn gold sm" data-act="save">${it.saved ? '다시 저장' : '저장'}</button></span></div>`;
       }
@@ -325,7 +329,7 @@
           const s = it.slots[+e.target.dataset.s];
           s[e.target.dataset.f] = parseInt(e.target.value.replace(/\D/g, ''), 10) || 0;
           it.saved = false;
-          e.target.closest('.item').querySelector(`[data-bv="${e.target.dataset.s}"]`).textContent = M(bvOf(s));
+          e.target.closest('.item').querySelector(`[data-bv="${e.target.dataset.s}"]`).textContent = D(bvOf(s));
           if (s.eval) s.check = s.hp + 4 * s.atk + 4 * s.def === s.eval ? 'ok' : 'bad'; else if (s.check) s.check = 'edited';
           e.target.closest('.item').querySelector(`[data-chk="${e.target.dataset.s}"]`).innerHTML = chkHtml(s);
           e.target.closest('.item').querySelector('[data-total]').textContent = M(avgOf(it.slots.map(bvOf)));
@@ -396,12 +400,12 @@
       let busy = Promise.resolve();
       const addFiles = files => {
         [...files].filter(f => /^image\//.test(f.type)).forEach(f => {
-          const it = { id: ++seq, fileName: f.name, reading: true };
+          const it = { id: ++seq, fileName: f.name, reading: true, preview: URL.createObjectURL(f), readMsg: '차례 기다리는 중…' };
           items.push(it); drawItem(it);
           busy = busy.then(async () => {
+            it.readMsg = '읽는 중…'; drawItem(it);
             try {
-              const r = await BvOCR.read(f, m => { $('#ocrmsg').textContent = m; });
-              $('#ocrmsg').textContent = '';
+              const r = await BvOCR.read(f);
               Object.assign(it, { reading: false, ocrNick: r.nick, slots: r.slots, newNick: '' });
               const actM = new Set(members.filter(x => x.active).map(x => x.id));
               const pool = accounts.filter(a => actM.has(a.member_id)).map(a => ({ id: a.id, nickname: a.name }));
@@ -411,7 +415,10 @@
               if (!m) { it.newNick = r.nick; if (exact) it.msg = '계정을 골라 주세요 (목록에 없으면 ＋ 새 계정)'; }
               if (it.memberId === 'new') it.ownerId = 'new';
               if (!r.slots.some(s => bvOf(s) > 0)) it.msg = '숫자를 못 읽었어요. 직접 넣어 주세요';
-            } catch (err) { it.reading = false; it.error = err.message; }
+            } catch (err) {
+              // 엔진이 안 되면 스크린샷을 보면서 직접 넣을 수 있게 빈 칸으로 연다
+              Object.assign(it, { reading: false, ocrNick: '', newNick: '', memberId: null, shot: it.preview, msg: err.message, slots: [0, 1, 2].map(() => ({ hp: 0, atk: 0, def: 0, img: '' })) });
+            }
             drawItem(it); updAll();
           });
         });

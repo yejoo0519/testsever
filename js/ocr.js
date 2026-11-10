@@ -85,19 +85,29 @@
     return c.toDataURL('image/jpeg', 0.7);
   }
 
-  let wText = null, wNum = null;
-  async function workers(onProgress) {
-    if (!w.Tesseract) throw new Error('글자 인식 엔진을 불러오지 못했어요');
-    if (!wNum) {
-      onProgress && onProgress('글자 인식 엔진 준비 중… (처음 한 번만 걸려요)');
-      wNum = await Tesseract.createWorker('eng', 1, TOPT);
-      await wNum.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789' });
-    }
-    if (!wText) {
-      wText = await Tesseract.createWorker(['kor', 'eng'], 1, TOPT);
-      await wText.setParameters({ tessedit_pageseg_mode: '7' });
-    }
+  // 엔진은 한 번만 받는다 (두 번째부터는 브라우저 캐시). 페이지에 들어오자마자 미리 받기 시작한다
+  let wText = null, wNum = null, ready = null;
+  const prog = { pct: 0, msg: '' }, subs = new Set();
+  const emit = () => subs.forEach(f => { try { f(prog); } catch (_) {} });
+  function warm(onProgress) {
+    if (onProgress) { subs.add(onProgress); onProgress(prog); }
+    if (ready) return ready;
+    if (!w.Tesseract) return (ready = Promise.reject(new Error('글자 인식 엔진을 불러오지 못했어요')));
+    const part = {};
+    const logger = key => m => {
+      if (typeof m.progress === 'number') part[key] = /loading|load/.test(m.status || '') ? m.progress : (part[key] || 0);
+      const v = Object.values(part); prog.pct = v.length ? Math.round(v.reduce((a, b) => a + b, 0) / 2 * 100) : 0;
+      prog.msg = '글자 인식 엔진 받는 중… ' + Math.min(99, prog.pct) + '% (처음 한 번만, 다음부턴 바로 돼요)'; emit();
+    };
+    prog.msg = '글자 인식 엔진 받는 중… (처음 한 번만, 다음부턴 바로 돼요)'; emit();
+    const timeout = new Promise((_, no) => setTimeout(() => no(new Error('글자 인식 엔진을 받지 못했어요 (인터넷이 느리거나 이 브라우저에서 안 돼요). 숫자를 직접 넣어 주세요')), 90000));
+    ready = Promise.race([Promise.all([
+      Tesseract.createWorker('eng', 1, { ...TOPT, logger: logger('n') }).then(async wk => { await wk.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789' }); wNum = wk; }),
+      Tesseract.createWorker(['kor', 'eng'], 1, { ...TOPT, logger: logger('t') }).then(async wk => { await wk.setParameters({ tessedit_pageseg_mode: '7' }); wText = wk; })
+    ]), timeout]).then(() => { prog.pct = 100; prog.msg = ''; prog.done = true; emit(); }, err => { prog.msg = err.message; prog.err = true; emit(); ready = null; throw err; });
+    return ready;
   }
+  async function workers() { await warm(); }
   const txt = async (wk, cv) => (await wk.recognize(cv)).data.text.replace(/\s+/g, ' ').trim();
 
   // 카드의 Eval = 체력 + 4×공격 + 4×방어. 이걸로 읽은 숫자를 검증하고, 한 칸만 틀렸으면 고친다
@@ -129,7 +139,7 @@
   }
 
   async function read(file, onProgress) {
-    await workers(onProgress);
+    await workers();
     const img = await load(file);
     const R = gameRect(img);
     URL.revokeObjectURL(img.src);
@@ -148,5 +158,5 @@
     return { nick, slots };
   }
 
-  w.BvOCR = { read };
+  w.BvOCR = { read, warm };
 })(window);
