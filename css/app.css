@@ -128,3 +128,7 @@ table.rk{width:100%;border-collapse:separate;border-spacing:0 6px}
 .dslot .st{margin-top:6px}
 .dslot .bv{margin-top:2px}
 @media(max-width:760px){.dslots{gap:6px}.dslot{padding:6px}.dslot img,.dslot .noimg{height:48px}.dslot .st{font-size:10.5px}}
+
+.chk{font-size:11px;font-weight:800}
+.chk .ok{color:var(--green)}.chk .fix{color:var(--gold)}.chk .bad{color:var(--red)}
+.item[data-bad="1"]{border-color:rgba(248,113,113,.5)}

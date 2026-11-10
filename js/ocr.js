@@ -14,7 +14,8 @@
     nick: [-500, 145, 1000, 70],
     cards: [-610, -193, 224],
     art: [8, 338, 370, 262],
-    stat: [[10, 697, 115, 38], [135, 697, 115, 38], [260, 697, 115, 38]]
+    stat: [[10, 697, 115, 38], [135, 697, 115, 38], [260, 697, 115, 38]],
+    eval: [190, 610, 120, 38]   // 'Eval : 7740' 의 숫자 부분 (초록 글자)
   };
 
   function load(file) {
@@ -61,7 +62,9 @@
     g.drawImage(R.c, sx, sy, sw, sh, 0, 0, c.width, c.height);
     const im = g.getImageData(0, 0, c.width, c.height), p = im.data;
     for (let i = 0; i < p.length; i += 4) {
-      const v = Math.max(p[i], p[i + 1], p[i + 2]) > thr ? 0 : 255;
+      const r = p[i], g = p[i + 1], b = p[i + 2];
+      const on = thr === 'green' ? (g > 90 && g > r + 25 && g > b + 25) : Math.max(r, g, b) > thr;
+      const v = on ? 0 : 255;
       p[i] = p[i + 1] = p[i + 2] = v; p[i + 3] = 255;
     }
     g.putImageData(im, 0, 0);
@@ -97,6 +100,34 @@
   }
   const txt = async (wk, cv) => (await wk.recognize(cv)).data.text.replace(/\s+/g, ' ').trim();
 
+  // 카드의 Eval = 체력 + 4×공격 + 4×방어. 이걸로 읽은 숫자를 검증하고, 한 칸만 틀렸으면 고친다
+  const evalOf = (h, a, d) => h + 4 * a + 4 * d;
+  function lev1(a, b) {
+    a = String(a); b = String(b); if (a === b) return true;
+    if (Math.abs(a.length - b.length) > 1) return false;
+    let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+    return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+  }
+  const MAXV = [9999, 2999, 2999];               // 이보다 크면 숫자를 잘못 읽은 것 (예: 846 → 8460)
+  function reconcile(h, a, d, ev) {
+    const v = [h, a, d];
+    const odd = v.map((x, k) => !x || x > MAXV[k]);
+    if (ev && evalOf(h, a, d) === ev) return { v, check: 'ok' };
+    if (!ev || !odd.some(Boolean)) return { v, check: odd.some(Boolean) ? 'bad' : (ev ? 'bad' : 'none') };
+    // 말이 안 되는 칸이 있을 때만 Eval 로 고친다 (Eval 자체를 잘못 읽은 경우에 멀쩡한 값을 망치지 않게)
+    const cands = [];
+    const w = [1, 4, 4];
+    for (let k = 0; k < 3; k++) {
+      const rest = ev - v.reduce((s, x, j) => j === k ? s : s + w[j] * x, 0);
+      if (rest <= 0 || rest % w[k]) continue;
+      const c = rest / w[k];
+      if (odd[k] && c > 0 && c <= MAXV[k] && lev1(c, v[k])) cands.push([k, c]);
+    }
+    if (cands.length === 1) { v[cands[0][0]] = cands[0][1]; return { v, check: 'fixed' }; }
+    return { v, check: 'bad' };
+  }
+
   async function read(file, onProgress) {
     await workers(onProgress);
     const img = await load(file);
@@ -110,7 +141,9 @@
       for (const s of L.stat) {
         v.push(parseInt((await txt(wNum, textCanvas(R, [cx + s[0], s[1], s[2], s[3]], 115))).replace(/\D/g, ''), 10) || 0);
       }
-      slots.push({ hp: v[0], atk: v[1], def: v[2], img: thumb(R, [cx + L.art[0], L.art[1], L.art[2], L.art[3]]) });
+      const ev = parseInt((await txt(wNum, textCanvas(R, [cx + L.eval[0], L.eval[1], L.eval[2], L.eval[3]], 'green'))).replace(/\D/g, ''), 10) || 0;
+      const fixd = reconcile(v[0], v[1], v[2], ev);
+      slots.push({ hp: fixd.v[0], atk: fixd.v[1], def: fixd.v[2], eval: ev, check: fixd.check, img: thumb(R, [cx + L.art[0], L.art[1], L.art[2], L.art[3]]) });
     }
     return { nick, slots };
   }

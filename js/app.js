@@ -6,7 +6,7 @@
   const view = $('#view');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const bvOf = s => (s && s.hp && s.atk && s.def) ? s.hp * s.atk * s.def : 0;
-  const M = v => v ? (v / 1e6).toFixed(1) : '—';
+  const M = v => v ? (v / 1e8).toFixed(1) + '억' : '—';   // 비밸은 억 단위 (소수 한 자리)
   const SLOT = ['1번용', '2번용', '3번용'];
   const EOK = v => v ? Math.round(v / 1e8) + '억' : '—';   // 총 비밸은 억 단위 정수로
   const avgOf = bvs => { const f = bvs.filter(v => v > 0); return f.length ? f.reduce((a, b) => a + b, 0) / f.length : 0; };
@@ -134,7 +134,7 @@
     }
     let wid = +(sessionStorage.getItem('go_week') || 0);
     if (!weeks.some(w => w.id === wid)) wid = weeks[0].id;
-    view.innerHTML = `<h1>${esc(title)}</h1><div class="sub">길드전 배치 화면 기준 · 비밸 = 체력 × 공격 × 방어 · 평균은 백만 단위, 총합은 억 단위</div>
+    view.innerHTML = `<h1>${esc(title)}</h1><div class="sub">길드전 배치 화면 기준 · 비밸 = 체력 × 공격 × 방어 · 억 단위</div>
       <div class="row"><select class="in" id="wk">${weeks.map(w => `<option value="${w.id}"${w.id === wid ? ' selected' : ''}>${esc(weekLabel(w))}</option>`).join('')}</select><span class="grow"></span></div>
       <div class="buffs" id="buffs"></div>
       ${adminView ? '<div class="chips" id="chips"></div>' : ''}
@@ -297,12 +297,13 @@
         if (it.reading) { el.innerHTML = `<div class="status">${esc(it.fileName)} 읽는 중…</div>`; return; }
         if (it.error) { el.innerHTML = `<div class="item-hd"><b>${esc(it.fileName)}</b><span class="status bad">${esc(it.error)}</span><span class="grow"></span><button class="btn sm" data-act="del">빼기</button></div>`; return; }
         const total = it.slots.reduce((a, s) => a + bvOf(s), 0);
+        el.dataset.bad = it.slots.some(s => s.check === 'bad') ? '1' : '';
         const dup = typeof it.memberId === 'number' && existing.has(it.memberId);
         el.innerHTML = `<div class="item-hd"><select class="in" data-k="member">${memberOpts(it)}</select>
           ${it.memberId === 'new' ? `<input class="in" data-k="newnick" placeholder="게임 닉네임" value="${esc(it.newNick)}"><select class="in" data-k="owner">${ownerOpts(it)}</select>` : ''}
           ${it.ocrNick ? `<span class="ocr">읽은 닉네임: ${esc(it.ocrNick)}</span>` : ''}
           ${dup ? '<span class="badge gold">이번 주 이미 제출 · 저장하면 덮어써요</span>' : ''}<span class="grow"></span></div>
-          <div class="slots">${it.slots.map((s, i) => `<div class="slot"><div class="slot-hd"><span class="no">${SLOT[i]}</span></div>
+          <div class="slots">${it.slots.map((s, i) => `<div class="slot"><div class="slot-hd"><span class="no">${SLOT[i]}</span><span class="grow"></span><span class="chk" data-chk="${i}">${chkHtml(s)}</span></div>
             ${s.img ? `<img src="${s.img}" alt="">` : ''}
             <div class="f"><div><label style="color:var(--hp)">체력</label><input class="in" inputmode="numeric" data-s="${i}" data-f="hp" value="${s.hp || ''}"></div>
             <div><label style="color:var(--atk)">공격</label><input class="in" inputmode="numeric" data-s="${i}" data-f="atk" value="${s.atk || ''}"></div>
@@ -310,6 +311,12 @@
             <div class="bvl">비밸 <b data-bv="${i}">${M(bvOf(s))}</b></div></div>`).join('')}</div>
           <div class="item-ft"><span class="total">평균 <b data-total>${M(avgOf(it.slots.map(bvOf)))}</b> · 총 <span data-eok>${EOK(total)}</span></span><span class="status ${it.saved ? 'ok' : ''}">${it.saved ? '저장됨' : esc(it.msg || '')}</span>
           <span class="row"><button class="btn sm" data-act="del">빼기</button><button class="btn gold sm" data-act="save">${it.saved ? '다시 저장' : '저장'}</button></span></div>`;
+      }
+      function chkHtml(s) {
+        if (s.check === 'ok') return '<span class="ok">✓ 게임 Eval과 일치</span>';
+        if (s.check === 'fixed') return '<span class="fix">Eval로 자동 보정</span>';
+        if (s.check === 'bad') return `<span class="bad">⚠ 확인 필요${s.eval ? ' (Eval ' + s.eval + ')' : ''}</span>`;
+        return '';
       }
       const findIt = el => items.find(x => 'it-' + x.id === el.closest('.item').id);
       $('#items').addEventListener('input', e => {
@@ -319,6 +326,8 @@
           s[e.target.dataset.f] = parseInt(e.target.value.replace(/\D/g, ''), 10) || 0;
           it.saved = false;
           e.target.closest('.item').querySelector(`[data-bv="${e.target.dataset.s}"]`).textContent = M(bvOf(s));
+          if (s.eval) s.check = s.hp + 4 * s.atk + 4 * s.def === s.eval ? 'ok' : 'bad'; else if (s.check) s.check = 'edited';
+          e.target.closest('.item').querySelector(`[data-chk="${e.target.dataset.s}"]`).innerHTML = chkHtml(s);
           e.target.closest('.item').querySelector('[data-total]').textContent = M(avgOf(it.slots.map(bvOf)));
           e.target.closest('.item').querySelector('[data-eok]').textContent = EOK(it.slots.reduce((a, x) => a + bvOf(x), 0));
         } else if (e.target.dataset.k === 'newnick') { it.newNick = e.target.value; }
@@ -360,6 +369,10 @@
           const acc = accounts.find(x => x.id === it.memberId);
           if (!it.slots.some(s => bvOf(s) > 0)) throw new Error('체/공/방을 넣어 주세요');
           const slots = it.slots.map(s => ({ hp: s.hp || 0, atk: s.atk || 0, def: s.def || 0, img: s.img || '' }));
+          if (it.slots.some(s => s.check === 'bad') && !it.forceOk) {
+            if (!confirm('⚠ 확인 필요로 표시된 숫자가 있어요. 그대로 저장할까요?')) throw new Error('⚠ 표시된 칸을 확인해 주세요');
+            it.forceOk = true;
+          }
           const total = slots.reduce((a, s) => a + bvOf(s), 0);
           await q(sb.from('go_specs').upsert({ week_id: wid, account_id: it.memberId, member_id: acc ? acc.member_id : null, slots, total, updated_by: toId(me.session.user.email), updated_at: new Date().toISOString() }, { onConflict: 'week_id,account_id' }));
           log('spec.save', `${weeks.find(w => w.id === wid).start_date} ${acc ? acc.name : it.memberId} 평균 ${M(avgOf(slots.map(bvOf)))}`);
