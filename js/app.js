@@ -11,8 +11,8 @@
 
   let me = { session: null, role: null };
 
-  // 아이디로 로그인: 내부적으로는 '아이디@guild.local' 이메일 계정으로 저장
-  const DOMAIN = '@guild.local';
+  // 아이디로 로그인: 내부적으로는 '아이디@guild.dbryong.com' 이메일 계정으로 저장
+  const DOMAIN = '@guild.dbryong.com'; // 실제로 메일은 안 보냄 (Confirm email 꺼둔 상태)
   const ID_RE = /^[a-z0-9_.-]{2,20}$/;
   const toEmail = id => String(id || '').trim().toLowerCase() + DOMAIN;
   const toId = em => String(em || '').toLowerCase().replace(DOMAIN, '');
