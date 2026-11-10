@@ -8,10 +8,11 @@
 
 ## 처음 설정
 
-1. Supabase guild 프로젝트 대시보드 → SQL Editor → `setup.sql` 전체를 붙여넣고 Run
-2. Authentication → Sign In / Providers → **Allow new users to sign up 끄기**
-3. Authentication → Users → Add user (이메일·비밀번호, Auto Confirm 체크)
-4. SQL Editor 에서 `insert into go_admins(email, role) values ('그 이메일', 'master');`
+1. Supabase guild 프로젝트 → SQL Editor → `setup.sql` 전체 Run
+2. Authentication → Sign In / Providers → **Allow new users to sign up 켜기**, Email → **Confirm email 끄기**
+   (가입은 열려 있어도 `go_admins` 에 없는 계정은 아무것도 못 바꿈)
+3. 사이트 `#/login` → '처음 설정'에서 마스터 아이디·비밀번호 만들기
+4. 다른 운영진 계정은 관리 화면 → 계정 에서 아이디·비밀번호로 만들기
 5. GitHub 저장소 Settings → Pages → Branch `main` / `/ (root)`
 
 글자 인식은 Tesseract.js(`vendor/tesseract`)를 브라우저에서 돌려서, 스크린샷은 서버로 보내지 않음.

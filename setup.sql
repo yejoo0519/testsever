@@ -82,5 +82,22 @@ drop policy if exists go_logs_read on go_logs;
 create policy go_logs_insert on go_logs for insert to authenticated with check (go_is_admin());
 create policy go_logs_read on go_logs for select to authenticated using (go_is_master());
 
--- ▼ 첫 마스터 계정: Authentication → Users → Add user 로 만든 이메일을 넣고 실행
--- insert into go_admins(email, role) values ('여기에_이메일', 'master') on conflict (email) do update set role = 'master';
+-- 처음 설정: 관리자가 아무도 없을 때만 사이트에서 마스터 계정을 만들 수 있게
+create or replace function go_needs_setup() returns boolean
+language sql stable security definer set search_path = public as $$
+  select not exists(select 1 from go_admins);
+$$;
+create or replace function go_bootstrap() returns text
+language plpgsql security definer set search_path = public as $$
+declare e text := lower(coalesce(auth.jwt()->>'email',''));
+begin
+  if e = '' then raise exception 'login required'; end if;
+  if exists(select 1 from go_admins) then raise exception 'already set up'; end if;
+  insert into go_admins(email, role) values (e, 'master');
+  return e;
+end $$;
+grant execute on function go_needs_setup() to anon, authenticated;
+grant execute on function go_bootstrap() to authenticated;
+
+-- 그 다음: Authentication → Sign In / Providers 에서 가입 허용 ON, Email 의 Confirm email OFF
+-- 사이트 #/login 에 들어가면 '처음 설정' 화면에서 마스터 아이디/비밀번호를 만들 수 있어요.

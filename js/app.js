@@ -11,6 +11,16 @@
 
   let me = { session: null, role: null };
 
+  // 아이디로 로그인: 내부적으로는 '아이디@guild.local' 이메일 계정으로 저장
+  const DOMAIN = '@guild.local';
+  const ID_RE = /^[a-z0-9_.-]{2,20}$/;
+  const toEmail = id => String(id || '').trim().toLowerCase() + DOMAIN;
+  const toId = em => String(em || '').toLowerCase().replace(DOMAIN, '');
+  const checkId = id => { if (!ID_RE.test(String(id || '').trim().toLowerCase())) throw new Error('아이디는 영문 소문자·숫자·_ . - 2~20자로 만들어 주세요'); };
+  const checkPw = pw => { if (String(pw || '').length < 6) throw new Error('비밀번호는 6자 이상이어야 해요'); };
+  // 다른 사람 계정을 만들 때 내 로그인이 바뀌지 않게 따로 쓰는 클라이언트
+  const sbTemp = () => supabase.createClient(C.url, C.key, { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'go-temp' } });
+
   /* ── 공통 ───────────────────────────────────────── */
   function toast(msg, bad) {
     const t = $('#toast'); t.textContent = msg; t.className = 'toast' + (bad ? ' bad' : ''); t.hidden = false;
@@ -22,7 +32,7 @@
     return data;
   }
   async function log(action, detail) {
-    try { await sb.from('go_logs').insert({ actor: me.session && me.session.user.email, action, detail }); } catch (_) {}
+    try { await sb.from('go_logs').insert({ actor: me.session && toId(me.session.user.email), action, detail }); } catch (_) {}
   }
   function monday(d) {
     d = d ? new Date(d) : new Date();
@@ -53,7 +63,11 @@
     if (me.role) {
       n.innerHTML = a('dashboard', '주간 랭킹') + a('specs', '스펙 입력') + a('members', '길드원') + a('weeks', '주차 · 버프') +
         (me.role === 'master' ? a('accounts', '계정', '<span class="tag">MASTER</span>') + a('logs', '기록', '<span class="tag">MASTER</span>') : '') +
-        '<span class="sp"></span>' + a('ranking', '공개 랭킹') + '<button id="logout">로그아웃</button>';
+        '<span class="sp"></span>' + a('ranking', '공개 랭킹') + `<button id="chpw">${esc(toId(me.session.user.email))} · 비번 변경</button><button id="logout">로그아웃</button>`;
+      $('#chpw').onclick = async () => {
+        const pw = prompt('새 비밀번호 (6자 이상)'); if (pw == null) return;
+        try { checkPw(pw); const { error } = await sb.auth.updateUser({ password: pw }); if (error) throw error; toast('비밀번호를 바꿨어요'); } catch (err) { toast(err.message, true); }
+      };
       $('#logout').onclick = async () => { await sb.auth.signOut(); await refreshMe(); location.hash = '#/ranking'; };
     } else {
       n.innerHTML = a('ranking', '랭킹') + '<span class="sp"></span>' + a('login', '관리자 로그인');
@@ -158,20 +172,40 @@
   PAGES.login = {
     async render() {
       if (me.role) { location.hash = '#/dashboard'; return; }
-      view.innerHTML = `<div class="login card"><h1>관리자 로그인</h1><div class="sub">관리자 계정만 들어올 수 있어요.</div>
-        <form id="lf"><input class="in" id="em" type="email" placeholder="이메일" autocomplete="username" required>
-        <input class="in" id="pw" type="password" placeholder="비밀번호" autocomplete="current-password" required>
-        <button class="btn gold" style="width:100%">로그인</button><div class="status bad" id="lmsg" style="margin-top:8px"></div></form>
-        ${me.session && !me.role ? '<div class="status bad">로그인은 됐지만 관리자로 등록된 계정이 아니에요.</div>' : ''}</div>`;
+      let setup = false;
+      try { setup = !!(await q(sb.rpc('go_needs_setup'))); } catch (_) {}
+      view.innerHTML = setup
+        ? `<div class="login card"><h1>처음 설정</h1><div class="sub">아직 관리자가 없어요. 마스터 계정으로 쓸 아이디와 비밀번호를 정해 주세요.</div>
+          <form id="lf"><input class="in" id="uid" placeholder="아이디 (영문·숫자)" autocomplete="username" required>
+          <input class="in" id="pw" type="password" placeholder="비밀번호 (6자 이상)" autocomplete="new-password" required>
+          <input class="in" id="pw2" type="password" placeholder="비밀번호 확인" autocomplete="new-password" required>
+          <button class="btn gold" style="width:100%">마스터 계정 만들기</button><div class="status bad" id="lmsg" style="margin-top:8px"></div></form></div>`
+        : `<div class="login card"><h1>관리자 로그인</h1><div class="sub">관리자 계정만 들어올 수 있어요.</div>
+          <form id="lf"><input class="in" id="uid" placeholder="아이디" autocomplete="username" required>
+          <input class="in" id="pw" type="password" placeholder="비밀번호" autocomplete="current-password" required>
+          <button class="btn gold" style="width:100%">로그인</button><div class="status bad" id="lmsg" style="margin-top:8px"></div></form>
+          ${me.session && !me.role ? '<div class="status bad">로그인은 됐지만 관리자로 등록된 계정이 아니에요.</div>' : ''}</div>`;
       $('#lf').onsubmit = async e => {
         e.preventDefault();
-        $('#lmsg').textContent = '';
-        const { error } = await sb.auth.signInWithPassword({ email: $('#em').value.trim(), password: $('#pw').value });
-        if (error) { $('#lmsg').textContent = '로그인 실패: 이메일이나 비밀번호를 확인해 주세요.'; return; }
-        await refreshMe();
-        if (!me.role) { $('#lmsg').textContent = '관리자로 등록된 계정이 아니에요.'; return; }
-        log('login', '');
-        location.hash = '#/dashboard';
+        const msg = $('#lmsg'); msg.textContent = '';
+        const id = $('#uid').value.trim().toLowerCase(), pw = $('#pw').value;
+        try {
+          if (setup) {
+            checkId(id); checkPw(pw);
+            if (pw !== $('#pw2').value) throw new Error('비밀번호 확인이 달라요');
+            const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw });
+            if (error) throw new Error(/signups? not allowed|disabled/i.test(error.message) ? 'Supabase에서 가입 허용(Allow new users to sign up)을 켜 주세요' : error.message);
+            if (!data.session) throw new Error('Supabase에서 이메일 확인(Confirm email)을 꺼 주세요');
+            await q(sb.rpc('go_bootstrap'));
+          } else {
+            const { error } = await sb.auth.signInWithPassword({ email: toEmail(id), password: pw });
+            if (error) throw new Error('아이디나 비밀번호가 맞지 않아요');
+          }
+          await refreshMe();
+          if (!me.role) throw new Error('관리자로 등록된 계정이 아니에요');
+          log(setup ? 'setup' : 'login', '');
+          location.hash = '#/dashboard';
+        } catch (err) { msg.textContent = err.message; }
       };
     }
   };
@@ -294,7 +328,7 @@
           if (!it.slots.some(s => bvOf(s) > 0)) throw new Error('체/공/방을 넣어 주세요');
           const slots = it.slots.map(s => ({ hp: s.hp || 0, atk: s.atk || 0, def: s.def || 0, img: s.img || '' }));
           const total = slots.reduce((a, s) => a + bvOf(s), 0);
-          await q(sb.from('go_specs').upsert({ week_id: wid, member_id: it.memberId, slots, total, updated_by: me.session.user.email, updated_at: new Date().toISOString() }, { onConflict: 'week_id,member_id' }));
+          await q(sb.from('go_specs').upsert({ week_id: wid, member_id: it.memberId, slots, total, updated_by: toId(me.session.user.email), updated_at: new Date().toISOString() }, { onConflict: 'week_id,member_id' }));
           const m = members.find(x => x.id === it.memberId);
           log('spec.save', `${weeks.find(w => w.id === wid).start_date} ${m ? m.nickname : it.memberId} ${M(total)}`);
           existing.add(it.memberId);
@@ -421,18 +455,29 @@
     admin: true, master: true,
     async render() {
       const list = await q(sb.from('go_admins').select('*').order('created_at'));
-      view.innerHTML = `<h1>계정</h1><div class="sub">여기 등록된 이메일만 관리 화면에 들어올 수 있어요. 로그인 계정 자체는 Supabase 대시보드 → Authentication → Users 에서 만들어요.</div>
-        <form class="row card" id="af"><input class="in grow" id="em" type="email" placeholder="이메일" required><select class="in" id="rl"><option value="manager">관리자</option><option value="master">마스터</option></select><button class="btn gold">추가</button></form>
-        <div class="list" style="margin-top:12px">${list.map(a => `<div class="li" data-em="${esc(a.email)}"><b class="grow">${esc(a.email)}</b><span class="badge ${a.role === 'master' ? 'gold' : ''}">${a.role === 'master' ? '마스터' : '관리자'}</span>
-          ${a.email.toLowerCase() === me.session.user.email.toLowerCase() ? '<span class="badge">나</span>' : '<button class="btn sm red" data-act="del">삭제</button>'}</div>`).join('')}</div>`;
+      view.innerHTML = `<h1>계정</h1><div class="sub">관리 화면에 들어올 수 있는 계정이에요. 아이디·비밀번호를 만들어서 운영진에게 알려주면 돼요.</div>
+        <form class="row card" id="af"><input class="in grow" id="uid" placeholder="아이디 (영문·숫자)" autocomplete="off" required>
+        <input class="in grow" id="pw" type="text" placeholder="비밀번호 (6자 이상)" autocomplete="off" required>
+        <select class="in" id="rl"><option value="manager">관리자</option><option value="master">마스터</option></select><button class="btn gold">계정 만들기</button></form>
+        <div class="list" style="margin-top:12px">${list.map(a => `<div class="li" data-em="${esc(a.email)}"><b class="grow">${esc(toId(a.email))}</b><span class="badge ${a.role === 'master' ? 'gold' : ''}">${a.role === 'master' ? '마스터' : '관리자'}</span>
+          ${a.email.toLowerCase() === me.session.user.email.toLowerCase() ? '<span class="badge">나</span>' : '<button class="btn sm red" data-act="del">권한 삭제</button>'}</div>`).join('')}</div>`;
       $('#af').onsubmit = async e => {
         e.preventDefault();
-        try { const em = $('#em').value.trim().toLowerCase(); await q(sb.from('go_admins').upsert({ email: em, role: $('#rl').value })); log('admin.add', em + ' ' + $('#rl').value); go(); } catch (err) { toast(err.message, true); }
+        const id = $('#uid').value.trim().toLowerCase(), pw = $('#pw').value, role = $('#rl').value;
+        try {
+          checkId(id); checkPw(pw);
+          const { data, error } = await sbTemp().auth.signUp({ email: toEmail(id), password: pw });
+          if (error && !/already registered|already exists/i.test(error.message)) throw new Error(/not allowed|disabled/i.test(error.message) ? 'Supabase에서 가입 허용(Allow new users to sign up)을 켜 주세요' : error.message);
+          if (error) toast('이미 있는 아이디라 권한만 다시 줬어요 (비밀번호는 그대로)');
+          else if (!data.session) throw new Error('Supabase에서 이메일 확인(Confirm email)을 꺼 주세요');
+          await q(sb.from('go_admins').upsert({ email: toEmail(id), role }));
+          log('admin.add', id + ' ' + role); go();
+        } catch (err) { toast(err.message, true); }
       };
       view.querySelector('.list').onclick = async e => {
         const b = e.target.closest('[data-act]'); if (!b) return;
-        const em = b.closest('.li').dataset.em; if (!confirm(em + ' 의 관리자 권한을 뺄까요?')) return;
-        try { await q(sb.from('go_admins').delete().eq('email', em)); log('admin.delete', em); go(); } catch (err) { toast(err.message, true); }
+        const em = b.closest('.li').dataset.em; if (!confirm(toId(em) + ' 의 관리 권한을 뺄까요?')) return;
+        try { await q(sb.from('go_admins').delete().eq('email', em)); log('admin.delete', toId(em)); go(); } catch (err) { toast(err.message, true); }
       };
     }
   };
