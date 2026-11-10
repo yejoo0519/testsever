@@ -63,7 +63,7 @@
     const im = g.getImageData(0, 0, c.width, c.height), p = im.data;
     for (let i = 0; i < p.length; i += 4) {
       const r = p[i], g = p[i + 1], b = p[i + 2];
-      const on = thr === 'green' ? (g > 90 && g > r + 25 && g > b + 25) : Math.max(r, g, b) > thr;
+      const on = thr === 'green' ? (Math.max(r, g, b) > 120 && Math.max(r, g, b) - Math.min(r, g, b) > 80) : Math.max(r, g, b) > thr;
       const v = on ? 0 : 255;
       p[i] = p[i + 1] = p[i + 2] = v; p[i + 3] = 255;
     }
@@ -90,7 +90,7 @@
     const p = g.getImageData(0, 0, W, H).data, m = new Uint8Array(W * H);
     for (let i = 0; i < W * H; i++) {
       const r = p[i * 4], gg = p[i * 4 + 1], b = p[i * 4 + 2];
-      m[i] = mode === 'green' ? (gg > 90 && gg > r + 25 && gg > b + 25 ? 1 : 0) : (Math.max(r, gg, b) > 115 ? 1 : 0);
+      m[i] = mode === 'green' ? (Math.max(r, gg, b) > 120 && Math.max(r, gg, b) - Math.min(r, gg, b) > 80 ? 1 : 0) : (Math.max(r, gg, b) > 115 ? 1 : 0);
     }
     const col = x => { let n = 0; for (let y = 0; y < H; y++) n += m[y * W + x]; return n; };
     const runs = []; let st = -1;
@@ -109,10 +109,15 @@
     let gl = boxes.filter(b => b.y1 - b.y0 >= hMax * 0.6);   // 콜론·점·잡티 빼기
     // 붙어 버린 숫자는 폭으로 나눈다
     const out = [];
-    for (const b of gl) {
-      const h = b.y1 - b.y0, wd = b.x1 - b.x0, k = Math.max(1, Math.round(wd / (h * 0.62)));
-      for (let j = 0; j < k; j++) out.push({ ...b, x0: b.x0 + Math.round(wd * j / k), x1: b.x0 + Math.round(wd * (j + 1) / k) });
-    }
+    const cut = b => {
+      const h = b.y1 - b.y0, wd = b.x1 - b.x0;
+      if (wd <= h * 0.95) { out.push(b); return; }
+      let bx = -1, bv = 1e9;
+      for (let x = b.x0 + Math.round(h * 0.3); x < b.x1 - Math.round(h * 0.3); x++) { const v = col(x); if (v < bv) { bv = v; bx = x; } }
+      if (bx < 0 || bv > h * 0.35) { out.push(b); return; }   // 이음매가 가늘 때만 자른다
+      cut({ ...b, x1: bx }); cut({ ...b, x0: bx });
+    };
+    gl.forEach(cut);
     if (w.__RAW) return out.map(b => { const r = []; for (let y = b.y0; y < b.y1; y++) { let row = ''; for (let x = b.x0; x < b.x1; x++) row += m[y * W + x]; r.push(row); } return r; });
     return out.map(b => feat(m, W, b));
   }
@@ -168,7 +173,7 @@
   }
 
   // 엔진은 한 번만 받는다 (두 번째부터는 브라우저 캐시). 페이지에 들어오자마자 미리 받기 시작한다
-  let wText = null, wNum = null, wKor = null, ready = null;
+  let wText = null, wNum = null, wKor = null, wEng = null, ready = null;
   const prog = { pct: 0, msg: '' }, subs = new Set();
   const emit = () => subs.forEach(f => { try { f(prog); } catch (_) {} });
   function warm(onProgress) {
@@ -251,10 +256,13 @@
     const nickP = warm().then(async () => {
       if (!wKor) { wKor = Tesseract.createWorker('kor', 1, TOPT).then(async wk => { await wk.setParameters({ tessedit_pageseg_mode: '7' }); return wk; }); }
       const kor = (await txt(await wKor, textCanvas(R, L.nick, 100, 48))).trim();
-      const eng = (await txt(wText, textCanvas(R, L.nick, 150, 110))).replace(/[|]/g, '').trim();
+      if (!wEng) { wEng = Tesseract.createWorker('eng', 1, TOPT).then(async wk => { await wk.setParameters({ tessedit_pageseg_mode: '7' }); return wk; }); }
+      const mix = (await txt(wText, textCanvas(R, L.nick, 150, 110))).replace(/[|]/g, '').trim();
+      const eng = (await txt(await wEng, textCanvas(R, L.nick, 150, 72))).trim();
       const han = (kor.match(/[가-힣]+/g) || []).join('');
-      let guess = eng;
-      if (han) { const pre = (eng.match(/^[A-Za-z0-9_\-]+\./) || [''])[0]; guess = pre + han; }
+      let guess = mix;
+      if (han) { const pre = (eng.match(/^[A-Za-z][A-Za-z0-9_\-]*\./) || [''])[0]; guess = pre + han; }
+      else if (/[A-Za-z]{2}/.test(eng)) guess = eng;
       return { kor, eng, guess };
     });
     return { slots, nickP };

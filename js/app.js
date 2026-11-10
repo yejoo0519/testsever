@@ -236,13 +236,17 @@
   const sim = (a, b) => (!a && !b) ? 1 : (!a || !b) ? 0 : 1 - lev(a, b) / Math.max(a.length, b.length);
   function matchMember(reads, members) { // members: [{id, nickname}]
     const H = (String(reads.kor || '').match(/[가-힣]/g) || []).join('');
-    const Lt = String(reads.eng || '').toLowerCase().replace(/[^0-9a-z]/g, '');
+    const cl = t => String(t || '').toLowerCase().replace(/[^0-9a-z]/g, '');
+    const toks = String(reads.eng || '').split(/[.\s]+/).filter(Boolean);
+    const Lts = [cl(reads.eng), cl(toks[0]), cl(toks[toks.length - 1])];   // 한글 자리는 영문 판독이 깨지므로 앞·뒤 토막도 본다
+    const Lt = Lts[0];
+    const simL = lk => Math.max(...Lts.map(t => sim(lk, t)));
     if (!H && !Lt) return null;
     const sc = members.map(m => {
       const hk = (m.nickname.match(/[가-힣]/g) || []).join(''), lk = m.nickname.toLowerCase().replace(/[^0-9a-z]/g, '');
       // 이름이나 읽은 글자 중 긴 쪽 길이만큼 가중치 (한쪽에만 있는 부분은 감점)
-      const wh = Math.max(hk.length, H.length), wl = Math.max(lk.length, Lt.length), n = wh + wl; if (!n) return { m, s: 0 };
-      return { m, s: (wh * sim(hk, H) + wl * sim(lk, Lt)) / n + 0.02 * sim(norm(m.nickname), norm(reads.guess)) }; // 동점이면 전체가 더 닮은 쪽
+      const wh = Math.max(hk.length, H.length); if (!wh && !lk) return { m, s: 0 };
+      return { m, s: (wh * sim(hk, H) + (lk ? lk.length * simL(lk) : 0)) / (wh + lk.length || 1) + 0.02 * sim(norm(m.nickname), norm(reads.guess)) }; // 동점이면 전체가 더 닮은 쪽
     }).sort((a, b) => b.s - a.s);
     if (!sc.length || sc[0].s < 0.6) return null;
     if (sc[1] && sc[0].s < 0.95 && sc[0].s - sc[1].s < 0.1) return null;
