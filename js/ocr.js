@@ -52,9 +52,9 @@
   }
 
   // 글자만 검게 남긴 흑백 이미지 (thr: 이 밝기보다 밝은 픽셀 = 글자)
-  function textCanvas(R, rect, thr) {
+  function textCanvas(R, rect, thr, SS) {
     const [sx, sy, sw, sh] = region(R, ...rect);
-    const S = Math.max(2, Math.round(96 / sh));
+    const S = SS ? SS / sh : Math.max(2, Math.round(96 / sh));
     const c = document.createElement('canvas');
     c.width = Math.round(sw * S); c.height = Math.round(sh * S);
     const g = c.getContext('2d', { willReadFrequently: true });
@@ -168,7 +168,7 @@
   }
 
   // 엔진은 한 번만 받는다 (두 번째부터는 브라우저 캐시). 페이지에 들어오자마자 미리 받기 시작한다
-  let wText = null, wNum = null, ready = null;
+  let wText = null, wNum = null, wKor = null, ready = null;
   const prog = { pct: 0, msg: '' }, subs = new Set();
   const emit = () => subs.forEach(f => { try { f(prog); } catch (_) {} });
   function warm(onProgress) {
@@ -247,7 +247,16 @@
       }
       slots.push({ hp: fx.v[0], atk: fx.v[1], def: fx.v[2], eval: ev, check: fx.check, img: thumb(R, rect(L.art)) });
     }
-    const nickP = warm().then(async () => (await txt(wText, textCanvas(R, L.nick, 150))).replace(/[|]/g, '').trim());
+    // 닉네임: 한글은 한국어 전용 판독이, 영문·숫자는 한영 판독이 더 정확해서 둘 다 읽어 둔다
+    const nickP = warm().then(async () => {
+      if (!wKor) { wKor = Tesseract.createWorker('kor', 1, TOPT).then(async wk => { await wk.setParameters({ tessedit_pageseg_mode: '7' }); return wk; }); }
+      const kor = (await txt(await wKor, textCanvas(R, L.nick, 100, 48))).trim();
+      const eng = (await txt(wText, textCanvas(R, L.nick, 150, 110))).replace(/[|]/g, '').trim();
+      const han = (kor.match(/[가-힣]+/g) || []).join('');
+      let guess = eng;
+      if (han) { const pre = (eng.match(/^[A-Za-z0-9_\-]+\./) || [''])[0]; guess = pre + han; }
+      return { kor, eng, guess };
+    });
     return { slots, nickP };
   }
 

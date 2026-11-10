@@ -232,17 +232,21 @@
       d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
     return d[a.length][b.length];
   }
-  function matchMember(nick, members) { // members: [{id, nickname}]
-    const n = norm(nick); if (!n) return null;
+  // 읽은 닉네임과 계정 이름 비교: 한글 부분은 한국어 판독(kor)과, 영문·숫자 부분은 한영 판독(eng)과 비교
+  const sim = (a, b) => (!a && !b) ? 1 : (!a || !b) ? 0 : 1 - lev(a, b) / Math.max(a.length, b.length);
+  function matchMember(reads, members) { // members: [{id, nickname}]
+    const H = (String(reads.kor || '').match(/[가-힣]/g) || []).join('');
+    const Lt = String(reads.eng || '').toLowerCase().replace(/[^0-9a-z]/g, '');
+    if (!H && !Lt) return null;
     const sc = members.map(m => {
-      const k = norm(m.nickname); if (!k) return { m, s: 0 };
-      let s = 1 - lev(n, k) / Math.max(n.length, k.length);
-      if (k.length >= 2 && (n.includes(k) || k.includes(n))) s = Math.max(s, 0.9);
-      return { m, s };
+      const hk = (m.nickname.match(/[가-힣]/g) || []).join(''), lk = m.nickname.toLowerCase().replace(/[^0-9a-z]/g, '');
+      // 이름이나 읽은 글자 중 긴 쪽 길이만큼 가중치 (한쪽에만 있는 부분은 감점)
+      const wh = Math.max(hk.length, H.length), wl = Math.max(lk.length, Lt.length), n = wh + wl; if (!n) return { m, s: 0 };
+      return { m, s: (wh * sim(hk, H) + wl * sim(lk, Lt)) / n + 0.02 * sim(norm(m.nickname), norm(reads.guess)) }; // 동점이면 전체가 더 닮은 쪽
     }).sort((a, b) => b.s - a.s);
-    // 비슷한 후보가 둘 이상이면(예: Genesis.주 / Genesis.지용) 잘못 고르지 않게 직접 고르게 둔다
-    if (!sc.length || sc[0].s < 0.5) return null;
-    if (sc[1] && sc[0].s < 0.95 && sc[0].s - sc[1].s < 0.2) return null; // 확실히 하나만 비슷할 때만 자동 선택
+    if (!sc.length || sc[0].s < 0.6) return null;
+    if (sc[1] && sc[0].s < 0.95 && sc[0].s - sc[1].s < 0.1) return null;
+    if (sc[1] && sc[0].s >= 0.95 && sc[0].s - sc[1].s < 0.005) return null; // 비슷한 후보가 둘이면 직접 고르게
     return sc[0].m;
   }
 
@@ -410,12 +414,13 @@
               Object.assign(it, { reading: false, ocrNick: '', slots: r.slots, newNick: '', memberId: null, msg: '닉네임 읽는 중…' });
               if (!r.slots.some(s => bvOf(s) > 0)) it.msg = '숫자를 못 읽었어요. 직접 넣어 주세요';
               // 닉네임은 엔진이 준비되는 대로 따로 채운다 (숫자는 이미 보여 줌)
-              r.nickP.then(nick => {
+              r.nickP.then(reads => {
                 if (it.saved || it.picked) return;
+                const nick = reads.guess;
                 it.ocrNick = nick;
                 const actM = new Set(members.filter(x => x.active).map(x => x.id));
                 const pool = accounts.filter(a => actM.has(a.member_id)).map(a => ({ id: a.id, nickname: a.name }));
-                const m = matchMember(nick, pool);
+                const m = matchMember(reads, pool);
                 it.memberId = m ? m.id : (nick && !pool.length ? 'new' : null);
                 it.msg = m ? '' : (pool.length ? '계정을 골라 주세요 (목록에 없으면 ＋ 새 계정)' : '');
                 if (!m) it.newNick = nick;
