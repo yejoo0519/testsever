@@ -8,7 +8,7 @@
 
 ## 처음 설정
 
-1. Supabase 대시보드 → SQL Editor → `setup.sql` 전체를 붙여넣고 Run
+1. Supabase guild 프로젝트 대시보드 → SQL Editor → `setup.sql` 전체를 붙여넣고 Run
 2. Authentication → Sign In / Providers → **Allow new users to sign up 끄기**
 3. Authentication → Users → Add user (이메일·비밀번호, Auto Confirm 체크)
 4. SQL Editor 에서 `insert into go_admins(email, role) values ('그 이메일', 'master');`
