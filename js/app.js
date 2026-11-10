@@ -193,8 +193,15 @@
           if (setup) {
             checkId(id); checkPw(pw);
             if (pw !== $('#pw2').value) throw new Error('비밀번호 확인이 달라요');
-            const { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw });
-            if (error) throw new Error(/signups? not allowed|disabled/i.test(error.message) ? 'Supabase에서 가입 허용(Allow new users to sign up)을 켜 주세요' : error.message);
+            let { data, error } = await sb.auth.signUp({ email: toEmail(id), password: pw });
+            if (error && /already registered|already exists/i.test(error.message)) {
+              // 전에 만들다 만 계정이면 그 비밀번호로 로그인 시도
+              ({ data, error } = await sb.auth.signInWithPassword({ email: toEmail(id), password: pw }));
+              if (error) throw new Error(/not confirmed/i.test(error.message) ? 'Supabase → Authentication → Users 에서 이 계정을 지우고 다시 만들어 주세요' : '이미 있는 아이디예요. 비밀번호가 달라요');
+            } else if (error) {
+              throw new Error(/signups? not allowed|disabled/i.test(error.message) ? 'Supabase에서 가입 허용(Allow new users to sign up)을 켜 주세요'
+                : /rate limit/i.test(error.message) ? 'Supabase에서 이메일 확인(Confirm email)이 아직 켜져 있어요. 끄고 다시 해 주세요' : error.message);
+            }
             if (!data.session) throw new Error('Supabase에서 이메일 확인(Confirm email)을 꺼 주세요');
             await q(sb.rpc('go_bootstrap'));
           } else {
@@ -467,7 +474,7 @@
         try {
           checkId(id); checkPw(pw);
           const { data, error } = await sbTemp().auth.signUp({ email: toEmail(id), password: pw });
-          if (error && !/already registered|already exists/i.test(error.message)) throw new Error(/not allowed|disabled/i.test(error.message) ? 'Supabase에서 가입 허용(Allow new users to sign up)을 켜 주세요' : error.message);
+          if (error && !/already registered|already exists/i.test(error.message)) throw new Error(/not allowed|disabled/i.test(error.message) ? 'Supabase에서 가입 허용(Allow new users to sign up)을 켜 주세요' : /rate limit/i.test(error.message) ? 'Supabase에서 이메일 확인(Confirm email)을 꺼 주세요' : error.message);
           if (error) toast('이미 있는 아이디라 권한만 다시 줬어요 (비밀번호는 그대로)');
           else if (!data.session) throw new Error('Supabase에서 이메일 확인(Confirm email)을 꺼 주세요');
           await q(sb.from('go_admins').upsert({ email: toEmail(id), role }));
