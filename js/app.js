@@ -341,6 +341,7 @@
         if (e.target.dataset.k !== 'member') return;
         const it = findIt(e.target); const v = e.target.value;
         it.memberId = v === 'new' ? 'new' : v ? +v : null;
+        it.picked = true; if (it.msg === '닉네임 읽는 중…') it.msg = '';
         if (v === 'new' && !it.newNick) it.newNick = it.ocrNick || '';
         if (v === 'new' && !it.ownerId) it.ownerId = 'new';
         it.saved = false; drawItem(it);
@@ -406,15 +407,21 @@
             it.readMsg = '읽는 중…'; drawItem(it);
             try {
               const r = await BvOCR.read(f);
-              Object.assign(it, { reading: false, ocrNick: r.nick, slots: r.slots, newNick: '' });
-              const actM = new Set(members.filter(x => x.active).map(x => x.id));
-              const pool = accounts.filter(a => actM.has(a.member_id)).map(a => ({ id: a.id, nickname: a.name }));
-              const m = matchMember(r.nick, pool);
-              const exact = pool.length > 0;
-              it.memberId = m ? m.id : (r.nick && !exact ? 'new' : null);
-              if (!m) { it.newNick = r.nick; if (exact) it.msg = '계정을 골라 주세요 (목록에 없으면 ＋ 새 계정)'; }
-              if (it.memberId === 'new') it.ownerId = 'new';
+              Object.assign(it, { reading: false, ocrNick: '', slots: r.slots, newNick: '', memberId: null, msg: '닉네임 읽는 중…' });
               if (!r.slots.some(s => bvOf(s) > 0)) it.msg = '숫자를 못 읽었어요. 직접 넣어 주세요';
+              // 닉네임은 엔진이 준비되는 대로 따로 채운다 (숫자는 이미 보여 줌)
+              r.nickP.then(nick => {
+                if (it.saved || it.picked) return;
+                it.ocrNick = nick;
+                const actM = new Set(members.filter(x => x.active).map(x => x.id));
+                const pool = accounts.filter(a => actM.has(a.member_id)).map(a => ({ id: a.id, nickname: a.name }));
+                const m = matchMember(nick, pool);
+                it.memberId = m ? m.id : (nick && !pool.length ? 'new' : null);
+                it.msg = m ? '' : (pool.length ? '계정을 골라 주세요 (목록에 없으면 ＋ 새 계정)' : '');
+                if (!m) it.newNick = nick;
+                if (it.memberId === 'new') it.ownerId = 'new';
+                drawItem(it); updAll();
+              }).catch(() => { if (!it.picked) { it.msg = '닉네임은 직접 골라 주세요'; drawItem(it); } });
             } catch (err) {
               // 엔진이 안 되면 스크린샷을 보면서 직접 넣을 수 있게 빈 칸으로 연다
               Object.assign(it, { reading: false, ocrNick: '', newNick: '', memberId: null, shot: it.preview, msg: err.message, slots: [0, 1, 2].map(() => ({ hp: 0, atk: 0, def: 0, img: '' })) });
